@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-REQUIRED_FIELDS = ("id", "input", "expected")
+_REQUIRED_KEYS = {"id", "input", "expected"}
 
 
 @dataclass(frozen=True)
@@ -16,20 +16,19 @@ class TestCase:
 
 
 def load_test_cases(path: str | Path) -> list[TestCase]:
-    """Load and validate test cases from a JSONL file.
+    """Load test cases from a JSONL file.
 
     Args:
-        path: Path to the JSONL file. Each line must be a JSON object with
-              fields ``id``, ``input``, and ``expected``.
+        path: Path to the JSONL file. Each non-blank line must be a JSON object
+              with keys ``id``, ``input``, and ``expected``.
 
     Returns:
-        List of validated TestCase objects.
+        Non-empty list of TestCase objects.
 
     Raises:
-        FileNotFoundError: If the path does not exist.
-        ValueError: If any line contains malformed JSON or is missing a
-                    required field. The message names the line number and
-                    the specific problem.
+        FileNotFoundError: If the file does not exist.
+        ValueError: If any line contains invalid JSON, is missing required keys,
+                    or the file contains no test cases after filtering blank lines.
     """
     path = Path(path)
     if not path.exists():
@@ -46,16 +45,15 @@ def load_test_cases(path: str | Path) -> list[TestCase]:
                 record = json.loads(raw)
             except json.JSONDecodeError as exc:
                 raise ValueError(
-                    f"Line {line_num}: malformed JSON — {exc.msg} "
-                    f"(col {exc.colno}): {raw!r}"
+                    f"Line {line_num}: invalid JSON at col {exc.colno}: {raw!r}"
                 ) from exc
 
-            for field in REQUIRED_FIELDS:
-                if field not in record:
-                    raise ValueError(
-                        f"Line {line_num}: missing required field '{field}' "
-                        f"in record {record!r}"
-                    )
+            missing = _REQUIRED_KEYS - record.keys()
+            if missing:
+                raise ValueError(
+                    f"Line {line_num}: missing required keys {sorted(missing)!r} "
+                    f"in record {record!r}"
+                )
 
             cases.append(
                 TestCase(
@@ -64,5 +62,8 @@ def load_test_cases(path: str | Path) -> list[TestCase]:
                     expected=str(record["expected"]),
                 )
             )
+
+    if not cases:
+        raise ValueError(f"no test cases found in {path}")
 
     return cases
