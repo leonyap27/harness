@@ -1,0 +1,2 @@
+{"id": "t1", "input": "Who approves travel claims?", "expected": "Direct manager"}
+{"id": "t2", "input": "How do I submit a travel reimbursement?", "expected": "Submit the travel claim form to Finance within 14 days of return"}
