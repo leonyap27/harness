@@ -1,0 +1,63 @@
+Deployment Team Take-Home Assignment
+LLM/LMM AI R&D Team, Q Team
+Estimated time: ~2 hours
+
+Context
+You are joining a small AI/ML team embedded within a government organisation. The team deploys and maintains language models for users to use in their day to day tasks.
+The environment is on-premises so there is no cloud or internet access from the serving layer. You have a GPU cluster behind an API gateway. Multiple departments share the same endpoint. 
+The team is small and generalist with no dedicated DevOps role. So the engineers own what they build.
+Note on stating assumptions: wherever the brief is underspecified, state your assumption explicitly and move on. Candidates who document their assumptions are not penalised. If anything, it helps us appreciate the solution better.
+Part A – System Design
+An internal department has approached your team with this brief:
+“We need an LLM-based system that can answer questions about our internal documents. We have roughly 2,000 documents updated monthly. Peak load is around 20 concurrent users. Response time should feel snappy.”
+
+Design the system. Your writeup should cover:
+Architecture overview – components and how they connect
+Key decisions and explicit tradeoffs (include what you chose not to do, and why)
+What you would monitor post-deployment
+One failure mode that would only surface in production
+
+Limit: one page equivalent. Diagrams optional.
+
+Part B – Implementation
+Choose one track. Pick the one that best reflects your strengths. We hire for both.
+
+Option 1: Build a lightweight LLM evaluation harness.
+You are given a model endpoint (you can use a dummy or mock enpoint – return a fixed or randomised string) and a JSONL test file in this format:
+{"id": "q1", "input": "What is the leave policy?", "expected": "14 days annual leave"}
+{"id": "q2", "input": "Who approves travel claims?", "expected": "Direct manager"}
+Build a CLI tool or small service that:
+Runs each test case against the endpoint
+Scores each response (justify scoring mechanisms, given that they can vary)
+Outputs a structured summary (pass rate, failures with reasons, any anomalies)
+Handles endpoint errors gracefully
+
+Requirements:
+The tests should run successfully
+At least one unit test
+Clear error handling for malformed input and endpoint failures
+README: what it does, how to run it, what you’d add with more time
+
+Option 2: Build a minimal model fine-tuning and promotion pipeline.
+Use any text classification or generation dataset you can load in under a minute (e.g. IMDb, AG News, or similar). You will build a pipeline so the specific task is not as important.
+Your pipeline should:
+Load and version a dataset (justify your approach)
+Train or fine-tune a small model (a distilled checkpoint or simple model is fine as we are not evaluating based on GPU access)
+Log key training metrics to a file or local tracker
+Implement a basic model promotion check i.e. define at least one condition that must be met before a model is considered “ready”
+
+Requirements:
+The pipeline must be reproducible: running it twice with the same seed should produce the same result
+At least one unit test covering a non-trivial function
+README: design decisions, how to reproduce, one thing you’d change with more time
+
+Part C – Opinion
+Six months after deploying the system you designed in Part A, users report that answers are sometimes outdated or irrelevant even though the source documents are correct and up to date.
+In about 200 words, what are the first three things you’d investigate, and how specifically would you go about each one? Note that you should name the specific methods and not just the category.
+
+Submission 
+A repo link containing:
+Your Part B code and README
+Written answers for Parts A and C (preferably in PDF)
+
+
