@@ -1,167 +1,202 @@
-# LLM Evaluation Harness
+# Q Team Take-Home — Leon Ye
 
-A lightweight CLI tool for running structured test cases against an LLM endpoint, scoring responses, and producing a structured summary report.
+Three-part submission: system design (Part A), working implementation (Part B), and written investigation (Part C).
 
-Built for the Q Team take-home assignment.
+| Part | Summary |
+|---|---|
+| **[Part A](#part-a--system-design-on-prem-rag-for-internal-documents)** | On-prem RAG system for 2,000 internal documents, 20 concurrent users, no internet access |
+| **[Part B](#part-b--llm-evaluation-harness)** | Lightweight CLI harness — runs JSONL test cases against an LLM endpoint, scores and reports results |
+| **[Part C](#part-c--investigation-outdated-or-irrelevant-answers)** | Three specific things to investigate when answers go stale six months post-deployment |
 
 ---
 
-## Submission overview
+# Part A — System Design: On-Prem RAG for Internal Documents
 
-| Part | Format | Location |
+> **Constraints:** on-prem only · no internet at serving layer · GPU cluster shared across departments · ~2,000 docs, monthly refresh · 20 concurrent users · "snappy" = p95 ≤ 3 s · small generalist team, no dedicated DevOps
+
+## Architecture
+
+The system is a RAG pipeline split into two paths: an offline batch ingestion path and an online query path.
+
+### Offline — monthly batch ingestion
+
+```mermaid
+flowchart LR
+    NFS[/"Document Store\nNFS · PDF / DOCX"/]
+    PAR["Parser\nPyMuPDF / python-docx"]
+    CHK["Chunker\n512 tokens\n50-token overlap"]
+    EMB["Embedding Model\nall-MiniLM-L6-v2\nCPU · bundled locally"]
+    VDB[("Vector DB\nChroma\npersistent local")]
+
+    NFS --> PAR --> CHK --> EMB --> VDB
+```
+
+### Online — per-query path
+
+```mermaid
+flowchart LR
+    USR(["User"])
+    GW["API Gateway"]
+    SVC["RAG Service\nFastAPI"]
+    EMB2["Embedding Model\nCPU · ~30 ms"]
+    VDB2[("Vector DB\nChroma")]
+    LLM["LLM Endpoint\nGPU cluster"]
+
+    USR -->|"question"| GW
+    GW --> SVC
+    SVC -->|"① embed query"| EMB2
+    EMB2 -->|"query vector"| VDB2
+    VDB2 -->|"② top-K chunks"| SVC
+    SVC -->|"③ prompt + context"| LLM
+    LLM -->|"④ answer"| SVC
+    SVC -->|"response"| USR
+```
+
+**Components:**
+
+- **Document store** — shared network file system (NFS/SMB). No cloud storage; all data stays on-prem.
+- **Parser** — extracts plain text from PDF/DOCX (PyMuPDF / python-docx). CPU, runs in the batch job.
+- **Chunker** — 512-token fixed chunks, 50-token overlap. Preserves document ID and page number as metadata.
+- **Embedding model** — `all-MiniLM-L6-v2` bundled and cached locally. No external calls; no internet required. Runs on CPU; GPU not needed at this scale.
+- **Vector DB** — Chroma as a persistent local server. Stores embeddings plus metadata (source doc, page, `indexed_at` timestamp).
+- **RAG service** — FastAPI service handling the online path: embed → retrieve → build prompt → call LLM → return.
+- **LLM endpoint** — existing GPU-cluster endpoint behind the API gateway. Not owned by this team.
+- **Query cache** — in-memory LRU cache keyed on query hash. Effective for FAQ-style repeated questions across departments.
+
+## Key Decisions and Tradeoffs
+
+**Fixed-size chunking vs. semantic chunking** — Fixed chunks (512 tokens, 50 overlap) are simple, fast, and predictable. Semantic chunking produces better retrieval quality but requires per-format heuristics and more ingestion complexity. For a monthly batch on a small team, simplicity wins for v1. The overlap mitigates split-sentence boundary failures.
+
+**Chroma vs. Weaviate / Qdrant / pgvector** — Chroma deploys as a single process, needs minimal ops, and supports persistent local storage. Weaviate and Qdrant offer richer filtering and horizontal scale — unnecessary at 2,000 docs and 20 users. pgvector is viable if the team already runs PostgreSQL. For a team with no dedicated DevOps, Chroma's operational simplicity is the deciding factor.
+
+**CPU embedding vs. GPU embedding** — Embedding a 512-token query takes ~30–50 ms on a modern CPU. For 20 concurrent users this sits well inside the 3 s budget. Reserving GPU for the LLM avoids scheduling contention on the shared cluster. GPU embedding only matters above ~10× current query volume.
+
+**No fine-tuning** — Fine-tuning improves factual grounding but requires GPU time, versioned training data, and a promotion pipeline. RAG achieves the same grounding with faster iteration: update the doc store, re-run ingestion. Fine-tuning becomes appropriate when the domain vocabulary is highly specialised and retrieval alone cannot close the gap.
+
+**No real-time indexing** — A real-time pipeline (Kafka → index on upload) adds significant infrastructure complexity for marginal benefit when documents only change monthly. A scheduled batch job is sufficient.
+
+**No per-department ACL in v1** — Access control requires user identity propagation into the retrieval layer. If departments need isolation, the simplest path is separate Chroma collections per department, filtered at query time by a `department_id` field in the API request.
+
+## What I Would Monitor Post-Deployment
+
+| Signal | Why | How |
 |---|---|---|
-| **Part A** — On-prem RAG system design | Written | [docs/part_a_system_design.md](docs/part_a_system_design.md) |
-| **Part B** — LLM evaluation harness | Code + CLI | This README |
-| **Part C** — Investigation: outdated/irrelevant answers | Written | [docs/part_c_investigation.md](docs/part_c_investigation.md) |
+| **Query latency p50 / p95 / p99** | Core SLA. Split by stage (embed / retrieve / LLM) to localise degradation. | Prometheus histogram on the RAG service |
+| **LLM endpoint error and timeout rate** | The shared GPU endpoint is the highest-risk dependency. Timeouts cascade to users. | HTTP client metrics + alerting |
+| **Retrieval top-1 cosine score** | Low similarity means the query is out-of-distribution for the current index. | Log per query; alert if median drops below threshold |
+| **Vector DB index size** | Catches runaway re-ingestion (duplicate chunks) and confirms ingestion health. | Chroma collection count metric |
+| **Batch ingestion job success / duration** | Silent failures leave users querying stale data with no error signal. | Exit code + duration logged to a simple dashboard |
+| **User feedback (thumbs up / down)** | The only ground-truth signal for answer quality. Even a binary rating surfaces failures invisible to latency metrics. | In-app button → append to a log file |
+
+## One Failure Mode That Would Only Surface in Production
+
+**Stale embeddings from a partial re-ingestion run.**
+
+During the monthly batch job, chunks are re-embedded and upserted incrementally — unchanged documents are left in place, updated documents are rewritten. If the job exits halfway (OOM, disk full, timeout), the index is left in a mixed state: some documents at revision N+1, others still at revision N.
+
+A query that spans multiple documents now retrieves chunks from different revision states, leading to contradictory answers. The LLM synthesises a confident response from inconsistent context, and neither the user nor the system surfaces an error.
+
+This does not appear in development because fixture datasets always run to completion. In production, large corpora and resource pressure make partial runs likely.
+
+**Mitigation:** Treat each ingestion run as an atomic swap — write new chunks to a staging collection, validate chunk count and score distribution against the prior collection, then atomically alias the collection pointer. Expose the current collection version on a health endpoint so monitoring can detect a failed cutover.
 
 ---
 
-## What it does (Part B)
+# Part B — LLM Evaluation Harness
 
-- Loads test cases from a JSONL file (one JSON object per line: `id`, `input`, `expected`)
-- Runs each test case against a configurable LLM endpoint (or a built-in mock that returns deterministic/random strings)
-- Scores each response using a pluggable scoring strategy (exact match or keyword overlap — see [How scoring works](#how-scoring-works))
-- Outputs a structured summary: pass rate, per-case results, failures with reasons, and any anomalies
-- Handles endpoint errors (timeouts, HTTP errors, malformed responses) gracefully
-
----
+A lightweight CLI tool that runs structured JSONL test cases against an LLM endpoint, scores each response, and produces a structured summary with pass rate, failures, and anomaly detection.
 
 ## Project layout
 
 ```
 .
-├── harness/              # Core package
-│   ├── main.py           # CLI entry point
-│   ├── loader.py         # JSONL test case loader and validation
-│   ├── runner.py         # Runs test cases against the endpoint
-│   ├── scorer.py         # Scoring strategies
-│   └── mock_endpoint.py  # Built-in mock endpoint (no API key needed)
-├── tests/                # Pytest test suite
-│   ├── conftest.py       # Shared fixtures and paths
+├── harness/
+│   ├── main.py           # CLI entry point (argparse)
+│   ├── loader.py         # JSONL loader and validation
+│   ├── runner.py         # Runs cases against the endpoint; RunSummary dataclass
+│   ├── scorer.py         # exact_match and keyword_overlap scorers
+│   └── mock_endpoint.py  # Built-in mock (random / fixed / echo modes)
+├── tests/
 │   ├── test_loader.py    # Loader unit tests
-│   └── test_runner.py    # Runner and scorer tests
-├── fixtures/             # Test fixture JSONL files (used by pytest)
-├── sample_data/          # Ready-to-use JSONL test files for manual runs
-│   ├── normal_policy.jsonl
-│   ├── normal_travel.jsonl
-│   ├── edge_long_prompt.jsonl
-│   └── edge_empty_expected.jsonl
-├── outputs/              # Evaluation run outputs (committed, not gitignored)
-├── docs/                 # System design and assumptions (Part A)
-├── pyproject.toml        # Package metadata and entry point
-└── requirements.txt      # Pinned dev dependencies
+│   ├── test_runner.py    # Scorer, runner, format_summary tests
+│   └── test_eval_runner.py  # Acceptance tests for the eval pipeline
+├── data/
+│   └── test_cases.jsonl  # Five-question HR policy suite
+├── sample_data/          # Ready-to-run JSONL files for manual testing
+├── outputs/              # Committed evaluation run outputs
+├── fixtures/             # Pytest fixture JSONL files (bad JSON, missing fields)
+├── pyproject.toml
+└── requirements.txt
 ```
-
----
 
 ## Setup
 
 ```bash
 # 1. Create and activate a virtual environment
 python3 -m venv .venv
-source .venv/bin/activate   # Windows: .venv\Scripts\activate
+source .venv/bin/activate        # Windows: .venv\Scripts\activate
 
 # 2. Install the package and dev dependencies
 pip install -e ".[dev]"
 
-# 3. Confirm everything works
-pytest tests/ -v            # expect: 43 passed
-harness --help              # confirm the CLI is on your PATH
+# 3. Verify everything works
+pytest tests/ -v                 # expect: 43 passed
+harness --help                   # confirm the CLI is on your PATH
 ```
 
 Requires Python 3.11+. No external API key needed — the mock endpoint is built in.
 
----
-
 ## End-to-end walkthrough
 
-This is the fastest path from install to a real evaluation run.
-
-**1. Pick a test file.** The repo ships with two sets:
-
-| File | Purpose |
-|---|---|
-| `sample_data/normal_policy.jsonl` | Happy-path policy questions |
-| `sample_data/normal_travel.jsonl` | Travel-claim questions |
-| `sample_data/edge_long_prompt.jsonl` | Long inputs — stress-tests truncation |
-| `sample_data/edge_empty_expected.jsonl` | Empty expected field — always scores pass |
-| `data/test_cases.jsonl` | Full five-question HR policy suite |
-
-**2. Run the harness.**
+**Step 1 — Run the harness against the included test suite:**
 
 ```bash
 harness data/test_cases.jsonl
 ```
 
-**3. Read the summary** (see [How to read the output](#how-to-read-the-output) below).
-
-**4. Save full results for inspection.**
+**Step 2 — Save full JSON results:**
 
 ```bash
-harness data/test_cases.jsonl --output my_run.json
+harness data/test_cases.jsonl --output outputs/my_run.json
 ```
 
-**5. Try different scorers and modes** — see [How to run](#how-to-run) for all flags.
-
----
-
-## How to run
+**Step 3 — Try different modes and scorers:**
 
 ```bash
-# Run the harness against the built-in mock endpoint (random mode)
-harness sample_data/normal_policy.jsonl
+# Fixed response mode — every case gets the same mock answer
+harness data/test_cases.jsonl --mode fixed
 
-# Use exact-match scoring instead of the default keyword overlap
-harness sample_data/normal_policy.jsonl --scorer exact_match
+# Exact-match scoring — stricter than the default keyword overlap
+harness data/test_cases.jsonl --mode fixed --scorer exact_match
 
-# Fixed response mode with a seed for reproducible runs
-harness sample_data/normal_policy.jsonl --mode fixed --seed 42
+# Simulate 20% endpoint failure rate
+harness data/test_cases.jsonl --fail-rate 0.2 --log-level DEBUG
 
-# Simulate 20% endpoint failure rate (tests error handling)
-harness sample_data/normal_policy.jsonl --fail-rate 0.2
+# Reproducible run (same seed = same random responses every time)
+harness data/test_cases.jsonl --mode random --seed 42
+```
 
-# Write full JSON results to a file
-harness sample_data/normal_policy.jsonl --output results.json
+**Step 4 — Run the unit tests:**
 
-# Run tests
+```bash
 pytest tests/ -v
 ```
 
-All options:
+A committed sample run is at [`outputs/sample_run.json`](outputs/sample_run.json) and the full CI test log is at [`.test-evidence/TW-11/run-1.log`](.test-evidence/TW-11/run-1.log).
+
+## All CLI flags
 
 | Flag | Default | Description |
 |---|---|---|
-| `test_file` | *(required)* | Path to a `.jsonl` file |
+| `test_file` | *(required)* | Path to a `.jsonl` test file |
 | `--scorer` | `keyword_overlap` | `keyword_overlap` or `exact_match` |
 | `--mode` | `random` | Mock response mode: `random`, `fixed`, or `echo` |
-| `--seed` | `None` | RNG seed for reproducible random runs |
+| `--seed` | `None` | RNG seed — makes random runs reproducible |
 | `--fail-rate` | `0.0` | Probability `[0–1]` that a call raises a simulated error |
 | `--output` | `None` | Write full JSON results to this path |
 | `--log-level` | `WARNING` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
 
----
-
-## Sample test case format
-
-Each line in a JSONL file is one test case:
-
-```json
-{"id": "q1", "input": "What is the leave policy?", "expected": "14 days annual leave"}
-```
-
-| Field | Type | Description |
-|---|---|---|
-| `id` | string | Unique identifier for the test case |
-| `input` | string | Prompt sent to the LLM endpoint |
-| `expected` | string | Expected response (used for scoring) |
-
-See [`sample_data/`](sample_data/) for ready-to-use examples.
-
----
-
 ## How to read the output
-
-A typical run prints:
 
 ```
 ============================================================
@@ -178,37 +213,30 @@ ANOMALIES:
   all responses identical ('14 days annual leave') — endpoint may be returning a fixed stub
 ```
 
-| Section | What it means |
+| Field | Meaning |
 |---|---|
-| `total / passed / failed / errors` | `errors` = endpoint threw an exception; `failed` = ran but scored below threshold |
-| `score=0.00 < threshold 0.50` | Jaccard overlap between response and expected tokens — 0 = no shared words, 1 = exact |
-| `missing tokens: [...]` | Words in the expected answer that are absent from the response |
-| `ANOMALIES` | Automatic sanity checks: all-errors (endpoint down?), all-identical (stuck stub?) |
-
-With `--output results.json` you get the same data as machine-readable JSON, one object per case, plus `pass_rate` at the top level. Useful for CI thresholds or post-run analysis.
+| `errors` | Endpoint threw an exception — the case was not scored |
+| `failed` | Endpoint responded but scored below the pass threshold |
+| `score=0.00 < threshold 0.50` | Jaccard overlap of token sets: 0 = no shared words, 1 = identical |
+| `missing tokens` | Words in the expected answer absent from the response |
+| `ANOMALIES` | Auto-detected: all-errors (endpoint down?), all-identical responses (stuck stub?) |
 
 Exit codes: `0` = all passed · `1` = at least one failure or error · `2` = bad input file.
 
----
-
 ## How to add custom evaluation
 
-### A. Custom test cases (no code needed)
-
-Create any `.jsonl` file with three fields per line and pass it directly:
+**Custom test cases (no code required)** — create any `.jsonl` file:
 
 ```jsonl
-{"id": "leave-01", "input": "How many days of annual leave do I get?", "expected": "14 days annual leave"}
-{"id": "travel-01", "input": "Who approves my travel claim?", "expected": "Direct manager"}
+{"id": "q1", "input": "What is the leave policy?", "expected": "14 days annual leave"}
+{"id": "q2", "input": "Who approves travel claims?", "expected": "Direct manager"}
 ```
 
 ```bash
 harness my_cases.jsonl
 ```
 
-### B. Custom endpoint (point at a real LLM)
-
-The `call_endpoint` function in `harness/mock_endpoint.py` is the only place the harness talks to a model. Swap it out in `main.py`, or call `run_evaluation()` directly from your own script:
+**Custom endpoint** — call `run_evaluation()` directly from your own script:
 
 ```python
 import requests
@@ -216,11 +244,7 @@ from harness.loader import load_test_cases
 from harness.runner import run_evaluation, format_summary
 
 def my_endpoint(prompt: str) -> str:
-    resp = requests.post(
-        "http://your-llm-host/v1/chat",
-        json={"prompt": prompt},
-        timeout=30,
-    )
+    resp = requests.post("http://your-llm-host/v1/chat", json={"prompt": prompt}, timeout=30)
     resp.raise_for_status()
     return resp.json()["response"]
 
@@ -229,63 +253,64 @@ summary = run_evaluation(cases, endpoint=my_endpoint)
 print(format_summary(summary))
 ```
 
-### C. Custom scorer
-
-Implement a function with the signature `(response: str, expected: str) -> Score` and pass it to `run_evaluation()`:
+**Custom scorer** — implement `(response: str, expected: str) -> Score`:
 
 ```python
 from harness.scorer import Score
 from harness.runner import run_evaluation
 
 def semantic_match(response: str, expected: str) -> Score:
-    # e.g. cosine similarity via sentence-transformers
-    score = my_embedding_similarity(response, expected)
+    score = my_embedding_similarity(response, expected)  # e.g. sentence-transformers
     passed = score >= 0.7
     return Score(passed=passed, method="semantic", score=score,
-                 reason="semantic similarity" if passed else f"similarity {score:.2f} < 0.70")
+                 reason="ok" if passed else f"similarity {score:.2f} < 0.70")
 
 summary = run_evaluation(cases, endpoint=my_endpoint, scorer=semantic_match)
 ```
 
-The built-in scorers in `harness/scorer.py` follow the same pattern and are good reference implementations.
-
----
-
 ## How scoring works
 
-Two built-in scorers are available. Both normalise text (lowercase, collapsed whitespace) before comparing.
+Two built-in scorers, both normalise text (lowercase, collapsed whitespace) before comparing.
 
-**`keyword_overlap`** (default) — Jaccard similarity on token sets.
+**`keyword_overlap`** (default) — Jaccard similarity on token sets:
 
 ```
 score = |tokens(response) ∩ tokens(expected)| / |tokens(response) ∪ tokens(expected)|
 ```
 
-A case passes when `score >= 0.5`. Appropriate for policy-style answers where word-for-word match is unrealistic but key terms (numbers, names, IDs) should appear.
+Passes when `score ≥ 0.5`. Good for policy answers where paraphrase is acceptable but key terms (numbers, names, IDs) must appear.
 
-**`exact_match`** — case-insensitive, whitespace-normalised string equality. Score is `1.0` (pass) or `0.0` (fail). Use when the expected answer is a short canonical phrase and paraphrase is unacceptable.
-
-Select with `--scorer exact_match`. To add a custom scorer, implement `(response: str, expected: str) -> Score` and pass it directly to `run_evaluation()`.
-
----
+**`exact_match`** — case-insensitive, whitespace-normalised string equality. Score is `1.0` (pass) or `0.0` (fail). Use when the expected answer is a short canonical phrase.
 
 ## How errors are handled
 
-The harness treats every failure as a data point rather than a crash:
-
-- **Malformed JSONL** — the loader raises `ValueError` with the line number and field name before any cases run. The CLI prints the error and exits with code `2`.
-- **Missing file** — `FileNotFoundError` is raised immediately on load. Same exit path.
-- **Endpoint error** (any exception during a call) — the case is recorded as an error (`response=None`, `error=<message>`). The remaining cases continue to run.
-- **Anomaly detection** — after the run, the summary flags: all-cases-errored (endpoint likely down) and all-responses-identical (endpoint may be returning a fixed stub).
-
-Exit codes: `0` = all passed, `1` = at least one failure or error, `2` = input error (bad file, bad JSON).
-
----
+- **Malformed JSONL** — loader raises `ValueError` with the line number and field name before any cases run. CLI exits with code `2`.
+- **Missing file** — `FileNotFoundError` raised immediately. Same exit path.
+- **Endpoint error** — any exception during a call is caught, recorded as `error=<message>`, and the remaining cases continue. The run is never aborted mid-flight.
+- **Anomaly detection** — post-run flags: all-cases-errored and all-responses-identical.
 
 ## What I'd add with more time
 
-- **Semantic scoring** via sentence embeddings (cosine similarity) — avoids penalising correct paraphrases
-- **Async runner** to parallelise requests against the endpoint for large test suites
-- **CI integration** (GitHub Actions) to gate on pass-rate thresholds before deployment
-- **HTML report** output as an alternative to the structured JSON summary
+- **Semantic scoring** via sentence embeddings (cosine similarity) — penalises wrong answers, not correct paraphrases
+- **Async runner** to parallelise requests for large test suites
+- **CI integration** to gate deployments on a minimum pass-rate threshold
+- **HTML report** as an alternative to the JSON output
 - **Retry logic** with exponential backoff for transient endpoint errors
+
+---
+
+# Part C — Investigation: Outdated or Irrelevant Answers
+
+**Scenario:** Six months post-deployment, users report answers that are outdated or irrelevant even though source documents are correct and up to date.
+
+## 1. Index staleness — reconciliation query
+
+The most likely cause is the vector index lagging behind the monthly document refresh. I would run a reconciliation pass: compare each document's `last_modified` timestamp on the file system against the `indexed_at` field stored in chunk metadata at ingestion time. Any document where `indexed_at < last_modified` has stale embeddings. I would then inspect the batch job logs for the last three runs to confirm the job completed — a silent partial exit due to OOM or disk pressure is the most common culprit at this scale, and it leaves the index in a mixed-revision state with no visible error to the user.
+
+## 2. Retrieval quality drift — Recall@k on a golden set
+
+A shift in retrieval quality produces plausible-sounding but wrong answers even when the index is current. I would build a golden set of 20–30 query/passage pairs from known-correct answers at deployment time, then compute Recall@5 and NDCG@5 on the current index and compare against the baseline. If the metric dropped, I would check whether the embedding model binary or tokeniser changed since deployment — even a minor library upgrade can shift the embedding space enough to degrade retrieval without triggering any error.
+
+## 3. Chunking or metadata filter mismatch — BM25 comparison
+
+Relevant content may exist in the index but fail to surface due to chunk boundary errors or an overly restrictive metadata filter. I would run BM25 (via `rank-bm25`, no external dependencies) over the raw document text for the failing queries, then compare which passages rank highly against what the dense retriever returns. Passages that score well under BM25 but are absent from dense retrieval point to a chunking or embedding mismatch. I would also audit any department or date-range metadata filters applied at query time to confirm they are not inadvertently excluding valid documents.
