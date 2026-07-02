@@ -6,8 +6,9 @@ import logging
 import sys
 from pathlib import Path
 
+from harness.loader import load_test_cases
 from harness.mock_endpoint import call_endpoint
-from harness.runner import format_summary, load_test_cases, run_evaluation
+from harness.runner import format_summary, run_evaluation
 from harness.scorer import exact_match, keyword_overlap
 
 
