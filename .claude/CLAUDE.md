@@ -1,4 +1,4 @@
-# Project: rag_simulator
+# Project: harness
 
 Inherits user-global rules from `~/.claude/CLAUDE.md` (team rulebook, memory policy, generic workflows).
 
