@@ -1,0 +1,67 @@
+============================= test session starts ==============================
+platform darwin -- Python 3.14.2, pytest-9.1.1, pluggy-1.6.0 -- /opt/homebrew/opt/python@3.14/bin/python3.14
+cachedir: .pytest_cache
+rootdir: /Users/leonye/my_project/Harness
+configfile: pyproject.toml
+collecting ... collected 43 items
+
+tests/test_eval_runner.py::test_all_cases_sent_to_endpoint PASSED        [  2%]
+tests/test_eval_runner.py::test_endpoint_failure_does_not_raise PASSED   [  4%]
+tests/test_eval_runner.py::test_run_continues_after_one_failure PASSED   [  6%]
+tests/test_eval_runner.py::test_mock_endpoint_returns_non_empty_string PASSED [  9%]
+tests/test_loader.py::test_valid_jsonl_returns_all_cases PASSED          [ 11%]
+tests/test_loader.py::test_valid_jsonl_preserves_field_values PASSED     [ 13%]
+tests/test_loader.py::test_empty_lines_are_skipped PASSED                [ 16%]
+tests/test_loader.py::test_file_not_found_raises PASSED                  [ 18%]
+tests/test_loader.py::test_bad_json_raises_value_error PASSED            [ 20%]
+tests/test_loader.py::test_bad_json_error_includes_line_number PASSED    [ 23%]
+tests/test_loader.py::test_bad_json_error_mentions_malformed PASSED      [ 25%]
+tests/test_loader.py::test_missing_field_raises_value_error PASSED       [ 27%]
+tests/test_loader.py::test_missing_field_error_includes_field_name PASSED [ 30%]
+tests/test_loader.py::test_missing_field_error_includes_line_number PASSED [ 32%]
+tests/test_loader.py::test_missing_id_field PASSED                       [ 34%]
+tests/test_loader.py::test_missing_input_field PASSED                    [ 37%]
+tests/test_runner.py::TestExactMatch::test_identical_strings_pass PASSED [ 39%]
+tests/test_runner.py::TestExactMatch::test_case_insensitive PASSED       [ 41%]
+tests/test_runner.py::TestExactMatch::test_whitespace_normalised PASSED  [ 44%]
+tests/test_runner.py::TestExactMatch::test_mismatch_fails PASSED         [ 46%]
+tests/test_runner.py::TestKeywordOverlap::test_full_overlap_passes PASSED [ 48%]
+tests/test_runner.py::TestKeywordOverlap::test_partial_overlap_above_threshold PASSED [ 51%]
+tests/test_runner.py::TestKeywordOverlap::test_no_overlap_fails PASSED   [ 53%]
+tests/test_runner.py::TestKeywordOverlap::test_empty_expected_always_passes PASSED [ 55%]
+tests/test_runner.py::TestKeywordOverlap::test_threshold_boundary PASSED [ 58%]
+tests/test_runner.py::TestMockEndpoint::test_fixed_mode_returns_same_response PASSED [ 60%]
+tests/test_runner.py::TestMockEndpoint::test_echo_mode_returns_prompt PASSED [ 62%]
+tests/test_runner.py::TestMockEndpoint::test_random_mode_with_seed_is_reproducible PASSED [ 65%]
+tests/test_runner.py::TestMockEndpoint::test_unknown_mode_raises_value_error PASSED [ 67%]
+tests/test_runner.py::TestMockEndpoint::test_fail_rate_1_always_raises PASSED [ 69%]
+tests/test_runner.py::TestMockEndpoint::test_fail_rate_0_never_raises PASSED [ 72%]
+tests/test_runner.py::TestLoadTestCases::test_valid_jsonl PASSED         [ 74%]
+tests/test_runner.py::TestLoadTestCases::test_missing_file_raises PASSED [ 76%]
+tests/test_runner.py::TestLoadTestCases::test_malformed_json_raises_value_error PASSED [ 79%]
+tests/test_runner.py::TestLoadTestCases::test_missing_key_raises_value_error PASSED [ 81%]
+tests/test_runner.py::TestLoadTestCases::test_empty_file_raises_value_error PASSED [ 83%]
+tests/test_runner.py::TestLoadTestCases::test_blank_lines_skipped PASSED [ 86%]
+tests/test_runner.py::TestRunEvaluation::test_all_pass_when_endpoint_echoes_expected PASSED [ 88%]
+tests/test_runner.py::TestRunEvaluation::test_endpoint_error_captured_not_raised PASSED [ 90%]
+tests/test_runner.py::TestRunEvaluation::test_run_continues_after_single_failure PASSED [ 93%]
+tests/test_runner.py::TestRunEvaluation::test_summary_totals_are_consistent PASSED [ 95%]
+tests/test_runner.py::TestFormatSummary::test_includes_pass_rate PASSED  [ 97%]
+tests/test_runner.py::TestFormatSummary::test_anomaly_all_errors_detected PASSED [100%]
+
+=============================== warnings summary ===============================
+harness/loader.py:11
+  /Users/leonye/my_project/Harness/harness/loader.py:11: PytestCollectionWarning: cannot collect test class 'TestCase' because it has a __init__ constructor (from: tests/test_eval_runner.py)
+    @dataclass(frozen=True)
+
+harness/loader.py:11
+  /Users/leonye/my_project/Harness/harness/loader.py:11: PytestCollectionWarning: cannot collect test class 'TestCase' because it has a __init__ constructor (from: tests/test_loader.py)
+    @dataclass(frozen=True)
+
+harness/loader.py:11
+  /Users/leonye/my_project/Harness/harness/loader.py:11: PytestCollectionWarning: cannot collect test class 'TestCase' because it has a __init__ constructor (from: tests/test_runner.py)
+    @dataclass(frozen=True)
+
+-- Docs: https://docs.pytest.org/en/stable/how-to/capture-warnings.html
+======================== 43 passed, 3 warnings in 0.03s ========================
+(eval):1: command not found: ruff
