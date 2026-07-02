@@ -66,7 +66,7 @@ def test_bad_json_error_includes_line_number():
 def test_bad_json_error_mentions_malformed(tmp_path: Path):
     f = tmp_path / "bad.jsonl"
     f.write_text('{"id":"1","input":"x","expected":"y"}\nnot json at all\n')
-    with pytest.raises(ValueError, match="malformed JSON"):
+    with pytest.raises(ValueError, match="invalid JSON"):
         load_test_cases(f)
 
 

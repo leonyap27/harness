@@ -1,4 +1,4 @@
-"""Evaluation runner -- runs test cases against an endpoint and scores results."""
+"""Evaluation runner — runs loaded test cases against an endpoint and scores results."""
 
 import logging
 from dataclasses import dataclass, field
@@ -44,14 +44,14 @@ def run_evaluation(
 ) -> RunSummary:
     """Run all test cases against the endpoint.
 
-    Each case is attempted independently -- a failure or endpoint error does not
+    Each case is attempted independently — a failure or endpoint error does not
     stop the run. All results are captured and returned.
 
     Args:
         cases: List of TestCase objects.
         endpoint: Callable that takes a prompt string and returns a response string.
                   May raise any exception to signal an endpoint error.
-        scorer: Callable(response, expected) -> Score. Defaults to keyword_overlap.
+        scorer: Callable(response, expected) → Score. Defaults to keyword_overlap.
 
     Returns:
         RunSummary with per-case results and aggregate statistics.
@@ -131,16 +131,16 @@ def _detect_anomalies(summary: RunSummary) -> list[str]:
     anomalies: list[str] = []
 
     if summary.errors == summary.total:
-        anomalies.append("all cases returned endpoint errors -- endpoint may be down")
+        anomalies.append("all cases returned endpoint errors — endpoint may be down")
     elif summary.errors > summary.total * 0.5:
         anomalies.append(
-            f"high error rate ({summary.errors}/{summary.total}) -- check endpoint stability"
+            f"high error rate ({summary.errors}/{summary.total}) — check endpoint stability"
         )
 
     responses = [r.response for r in summary.results if r.response is not None]
     if len(set(responses)) == 1 and len(responses) > 1:
         anomalies.append(
-            f"all responses identical ({responses[0]!r}) -- endpoint may be returning a fixed stub"
+            f"all responses identical ({responses[0]!r}) — endpoint may be returning a fixed stub"
         )
 
     return anomalies

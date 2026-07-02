@@ -2,15 +2,18 @@
 
 Two scorers are provided and justified:
 
-1. exact_match     -- strict string equality after normalisation.
-                      Best when the expected answer is a canonical phrase.
+1. exact_match   — strict string equality after normalisation.
+                   Appropriate when the expected answer is a canonical phrase
+                   (e.g. "14 days annual leave"). Zero tolerance for paraphrase.
 
-2. keyword_overlap -- Jaccard similarity on lowercased token sets.
-                      Better for longer answers where exact phrasing varies but
-                      key terms (policy IDs, names, numbers) should be present.
+2. keyword_overlap — Jaccard similarity on lowercased token sets.
+                   Appropriate for longer answers where word-for-word match is
+                   unrealistic but key terms should appear (e.g. policy IDs,
+                   names, numbers). Threshold default is 0.5 (at least half the
+                   expected tokens appear in the response).
 
-The harness defaults to keyword_overlap because it is more robust to trivial
-phrasing variation without requiring an LLM-as-judge.
+The harness uses keyword_overlap as the primary scorer because it is more robust
+to trivial phrasing variation without requiring an LLM judge.
 """
 
 import re

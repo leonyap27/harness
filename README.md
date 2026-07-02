@@ -1,82 +1,101 @@
 # LLM Evaluation Harness
 
-A lightweight CLI tool for running a test suite against an LLM endpoint and scoring the responses.
+A lightweight CLI tool for running structured test cases against an LLM endpoint, scoring responses, and producing a structured summary report.
 
-Built for Part B (Option 1) of the Deployment Team take-home assignment. A mock endpoint is included so no API key is required.
+Built for the Q Team take-home assignment (Part B, Option 1).
+
+---
 
 ## What it does
 
-1. Reads test cases from a JSONL file (`id`, `input`, `expected` fields)
-2. Sends each `input` to the mock LLM endpoint
-3. Scores the response against `expected` using Jaccard keyword overlap (or exact match)
-4. Outputs a structured summary: pass rate, failures with reasons, anomaly detection
-5. Optionally writes full results to a JSON file
+- Loads test cases from a JSONL file (one JSON object per line: `id`, `input`, `expected`)
+- Runs each test case against a configurable LLM endpoint (or a built-in mock that returns deterministic/random strings)
+- Scores each response using a pluggable scoring strategy (exact match, keyword overlap, or fuzzy similarity)
+- Outputs a structured summary: pass rate, per-case results, failures with reasons, and any anomalies
+- Handles endpoint errors (timeouts, HTTP errors, malformed responses) gracefully
+
+---
+
+## Project layout
+
+```
+.
+├── harness/              # Core package
+│   ├── main.py           # CLI entry point
+│   ├── loader.py         # JSONL test case loader and validation
+│   ├── runner.py         # Runs test cases against the endpoint
+│   ├── scorer.py         # Scoring strategies
+│   └── mock_endpoint.py  # Built-in mock endpoint (no API key needed)
+├── tests/                # Pytest test suite
+│   ├── conftest.py       # Shared fixtures and paths
+│   ├── test_loader.py    # Loader unit tests
+│   └── test_runner.py    # Runner and scorer tests
+├── fixtures/             # Test fixture JSONL files (used by pytest)
+├── sample_data/          # Ready-to-use JSONL test files for manual runs
+│   ├── normal_policy.jsonl
+│   ├── normal_travel.jsonl
+│   ├── edge_long_prompt.jsonl
+│   └── edge_empty_expected.jsonl
+├── outputs/              # Evaluation run outputs (committed, not gitignored)
+├── docs/                 # System design and assumptions (Part A)
+├── pyproject.toml        # Package metadata and entry point
+└── requirements.txt      # Pinned dev dependencies
+```
+
+---
+
+## Setup
+
+```bash
+python3 -m venv .venv
+source .venv/bin/activate
+pip install -e ".[dev]"
+```
+
+Requires Python 3.11+. No external API key needed — the mock endpoint is built in.
+
+---
 
 ## How to run
 
-**Prerequisites:** Python 3.11+
-
 ```bash
-# Install (editable)
-pip install -e .
+# Run the harness against the built-in mock endpoint
+harness run sample_data/normal_policy.jsonl
 
-# Run against the sample test cases
-harness data/test_cases.jsonl
+# Run against a real endpoint
+harness run sample_data/normal_policy.jsonl --endpoint http://your-llm-host/v1/chat
 
-# Reproducible run with a fixed seed
-harness data/test_cases.jsonl --seed 42
+# Specify scoring strategy (default: keyword_overlap)
+harness run sample_data/normal_policy.jsonl --scorer exact_match
 
-# Exact-match scoring
-harness data/test_cases.jsonl --scorer exact_match
-
-# Simulate 20% endpoint failure rate
-harness data/test_cases.jsonl --fail-rate 0.2
-
-# Write full results to JSON
-harness data/test_cases.jsonl --output results.json
+# Run tests
+pytest tests/ -v
 ```
 
-**Run tests:**
+---
 
-```bash
-pip install pytest
-pytest
+## Sample test case format
+
+Each line in a JSONL file is one test case:
+
+```json
+{"id": "q1", "input": "What is the leave policy?", "expected": "14 days annual leave"}
 ```
 
-## Scoring approach
-
-Two scorers are available:
-
-| Scorer | Method | When to use |
+| Field | Type | Description |
 |---|---|---|
-| `keyword_overlap` (default) | Jaccard similarity on token sets | Responses may paraphrase but should contain key terms |
-| `exact_match` | Case-insensitive, whitespace-normalised equality | Expected answer is a canonical phrase |
+| `id` | string | Unique identifier for the test case |
+| `input` | string | Prompt sent to the LLM endpoint |
+| `expected` | string | Expected response (used for scoring) |
 
-Jaccard threshold defaults to 0.5 (at least half the expected tokens present). This tolerates natural phrasing variation without requiring an LLM-as-judge, which keeps the harness dependency-free.
+See [`sample_data/`](sample_data/) for ready-to-use examples.
 
-## Project structure
+---
 
-```
-harness/
-  __init__.py
-  loader.py          -- JSONL loader and TestCase dataclass
-  mock_endpoint.py   -- mock LLM (fixed/random/echo modes, configurable fail_rate)
-  runner.py          -- run_evaluation() loop with per-case error isolation
-  scorer.py          -- exact_match and keyword_overlap scorers
-  main.py            -- CLI (argparse)
-data/
-  test_cases.jsonl   -- sample test cases
-tests/
-  test_loader.py     -- tests for JSONL loading and validation
-  test_eval_runner.py -- tests for AC1/AC2/AC3 of the runner
-fixtures/
-  valid.jsonl / bad_json.jsonl / missing_field.jsonl
-```
+## What I'd add with more time
 
-## What I would add with more time
-
-- **Real endpoint adapter**: an `http_endpoint(url, headers)` factory so the same harness works against a live API, not just the mock.
-- **Semantic similarity scorer**: cosine similarity of sentence embeddings for answers where keyword overlap is too coarse (e.g. "I need 2 weeks off" vs "14 days annual leave").
-- **Parallel execution**: `asyncio`/`ThreadPoolExecutor` so endpoint calls run concurrently -- matters when testing hundreds of cases against a slow endpoint.
-- **Retry logic**: exponential backoff on transient errors before marking a case as failed.
-- **HTML/CSV report**: human-readable output for non-technical stakeholders.
+- **Semantic scoring** via sentence embeddings (cosine similarity) — avoids penalising correct paraphrases
+- **Async runner** to parallelise requests against the endpoint for large test suites
+- **CI integration** (GitHub Actions) to gate on pass-rate thresholds before deployment
+- **HTML report** output as an alternative to the structured JSON summary
+- **Retry logic** with exponential backoff for transient endpoint errors

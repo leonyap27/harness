@@ -1,4 +1,4 @@
-"""Mock LLM endpoint -- returns deterministic or randomised responses without a real API key."""
+"""Mock LLM endpoint — returns deterministic or randomised responses without a real API key."""
 
 import random
 from typing import Optional

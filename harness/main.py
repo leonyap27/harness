@@ -38,14 +38,14 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         "--seed",
         type=int,
         default=None,
-        help="RNG seed for the mock endpoint -- makes runs reproducible.",
+        help="RNG seed for the mock endpoint — makes runs reproducible.",
     )
     parser.add_argument(
         "--fail-rate",
         type=float,
         default=0.0,
         metavar="RATE",
-        help="Probability [0-1] that each endpoint call fails (simulates errors).",
+        help="Probability [0–1] that each endpoint call fails (simulates errors).",
     )
     parser.add_argument(
         "--output",
