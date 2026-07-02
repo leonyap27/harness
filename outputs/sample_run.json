@@ -1,0 +1,64 @@
+{
+  "total": 5,
+  "passed": 1,
+  "failed": 4,
+  "errors": 0,
+  "pass_rate": 0.2,
+  "results": [
+    {
+      "id": "q1",
+      "input": "What is the leave policy?",
+      "expected": "14 days annual leave",
+      "response": "14 days annual leave",
+      "passed": true,
+      "score": 1.0,
+      "method": "keyword_overlap",
+      "reason": "keyword overlap sufficient",
+      "error": null
+    },
+    {
+      "id": "q2",
+      "input": "Who approves travel claims?",
+      "expected": "Direct manager",
+      "response": "14 days annual leave",
+      "passed": false,
+      "score": 0.0,
+      "method": "keyword_overlap",
+      "reason": "score 0.00 < threshold 0.50; missing tokens: ['direct', 'manager']",
+      "error": null
+    },
+    {
+      "id": "q3",
+      "input": "How do I submit a medical claim?",
+      "expected": "Submit form HR-03 to the HR department within 30 days",
+      "response": "14 days annual leave",
+      "passed": false,
+      "score": 0.0769,
+      "method": "keyword_overlap",
+      "reason": "score 0.08 < threshold 0.50; missing tokens: ['03', '30', 'department', 'form', 'hr', 'submit', 'the', 'to', 'within']",
+      "error": null
+    },
+    {
+      "id": "q4",
+      "input": "When must medical certificates be submitted?",
+      "expected": "Medical certificates must be submitted within 3 working days",
+      "response": "14 days annual leave",
+      "passed": false,
+      "score": 0.0833,
+      "method": "keyword_overlap",
+      "reason": "score 0.08 < threshold 0.50; missing tokens: ['3', 'be', 'certificates', 'medical', 'must', 'submitted', 'within', 'working']",
+      "error": null
+    },
+    {
+      "id": "q5",
+      "input": "Who do I contact for department head approval?",
+      "expected": "Contact your department head for approval",
+      "response": "14 days annual leave",
+      "passed": false,
+      "score": 0.0,
+      "method": "keyword_overlap",
+      "reason": "score 0.00 < threshold 0.50; missing tokens: ['approval', 'contact', 'department', 'for', 'head', 'your']",
+      "error": null
+    }
+  ]
+}
