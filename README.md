@@ -116,6 +116,10 @@ Two built-in scorers are available. Both normalise text (lowercase, collapsed wh
 
 **`keyword_overlap`** (default) — Jaccard similarity on token sets.
 
+Each line in a JSONL file is one test case:
+
+```json
+{"id": "q1", "input": "What is the leave policy?", "expected": "14 days annual leave"}
 ```
 score = |tokens(response) ∩ tokens(expected)| / |tokens(response) ∪ tokens(expected)|
 ```
