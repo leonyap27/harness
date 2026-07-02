@@ -2,11 +2,21 @@
 
 A lightweight CLI tool for running structured test cases against an LLM endpoint, scoring responses, and producing a structured summary report.
 
-Built for the Q Team take-home assignment (Part B, Option 1).
+Built for the Q Team take-home assignment.
 
 ---
 
-## What it does
+## Submission overview
+
+| Part | Format | Location |
+|---|---|---|
+| **Part A** — On-prem RAG system design | Written | [docs/part_a_system_design.md](docs/part_a_system_design.md) |
+| **Part B** — LLM evaluation harness | Code + CLI | This README |
+| **Part C** — Investigation: outdated/irrelevant answers | Written | [docs/part_c_investigation.md](docs/part_c_investigation.md) |
+
+---
+
+## What it does (Part B)
 
 - Loads test cases from a JSONL file (one JSON object per line: `id`, `input`, `expected`)
 - Runs each test case against a configurable LLM endpoint (or a built-in mock that returns deterministic/random strings)
