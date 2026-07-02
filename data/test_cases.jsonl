@@ -1,0 +1,5 @@
+{"id": "q1", "input": "What is the leave policy?", "expected": "14 days annual leave"}
+{"id": "q2", "input": "Who approves travel claims?", "expected": "Direct manager"}
+{"id": "q3", "input": "How do I submit a medical claim?", "expected": "Submit form HR-03 to the HR department within 30 days"}
+{"id": "q4", "input": "When must medical certificates be submitted?", "expected": "Medical certificates must be submitted within 3 working days"}
+{"id": "q5", "input": "Who do I contact for department head approval?", "expected": "Contact your department head for approval"}
