@@ -10,25 +10,38 @@
 
 The system is a standard **Retrieval-Augmented Generation (RAG)** pipeline split into two paths: an offline batch ingestion path and an online query path.
 
-```
-┌─────────────────── OFFLINE (batch, monthly) ───────────────────┐
-│                                                                  │
-│  Document store ──► Parser ──► Chunker ──► Embedding model      │
-│  (PDF/DOCX)         (text)    (512 tok    (CPU, on-prem)        │
-│                               overlap 50) ──► Vector DB          │
-│                                               (Chroma, local)    │
-└──────────────────────────────────────────────────────────────────┘
+### Offline — monthly batch ingestion
 
-┌─────────────────── ONLINE (per query) ─────────────────────────┐
-│                                                                  │
-│  User ──► API Gateway ──► RAG Service                           │
-│                           │                                      │
-│                           ├── 1. Embed query (CPU, ~30 ms)      │
-│                           ├── 2. Vector search top-K (Chroma)   │
-│                           ├── 3. Build prompt                    │
-│                           └── 4. Call LLM endpoint (GPU cluster) │
-│                                  └──► Return answer to user      │
-└──────────────────────────────────────────────────────────────────┘
+```mermaid
+flowchart LR
+    NFS[/"Document Store\nNFS · PDF / DOCX"/]
+    PAR["Parser\nPyMuPDF / python-docx"]
+    CHK["Chunker\n512 tokens\n50-token overlap"]
+    EMB["Embedding Model\nall-MiniLM-L6-v2\nCPU · bundled locally"]
+    VDB[("Vector DB\nChroma\npersistent local")]
+
+    NFS --> PAR --> CHK --> EMB --> VDB
+```
+
+### Online — per-query path
+
+```mermaid
+flowchart LR
+    USR(["User"])
+    GW["API Gateway"]
+    SVC["RAG Service\nFastAPI"]
+    EMB2["Embedding Model\nCPU · ~30 ms"]
+    VDB2[("Vector DB\nChroma")]
+    LLM["LLM Endpoint\nGPU cluster"]
+
+    USR -->|"question"| GW
+    GW --> SVC
+    SVC -->|"① embed query"| EMB2
+    EMB2 -->|"query vector"| VDB2
+    VDB2 -->|"② top-K chunks"| SVC
+    SVC -->|"③ prompt + context"| LLM
+    LLM -->|"④ answer"| SVC
+    SVC -->|"response"| USR
 ```
 
 **Components:**

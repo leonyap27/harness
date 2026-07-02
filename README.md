@@ -57,12 +57,51 @@ Built for the Q Team take-home assignment.
 ## Setup
 
 ```bash
+# 1. Create and activate a virtual environment
 python3 -m venv .venv
-source .venv/bin/activate
+source .venv/bin/activate   # Windows: .venv\Scripts\activate
+
+# 2. Install the package and dev dependencies
 pip install -e ".[dev]"
+
+# 3. Confirm everything works
+pytest tests/ -v            # expect: 43 passed
+harness --help              # confirm the CLI is on your PATH
 ```
 
 Requires Python 3.11+. No external API key needed — the mock endpoint is built in.
+
+---
+
+## End-to-end walkthrough
+
+This is the fastest path from install to a real evaluation run.
+
+**1. Pick a test file.** The repo ships with two sets:
+
+| File | Purpose |
+|---|---|
+| `sample_data/normal_policy.jsonl` | Happy-path policy questions |
+| `sample_data/normal_travel.jsonl` | Travel-claim questions |
+| `sample_data/edge_long_prompt.jsonl` | Long inputs — stress-tests truncation |
+| `sample_data/edge_empty_expected.jsonl` | Empty expected field — always scores pass |
+| `data/test_cases.jsonl` | Full five-question HR policy suite |
+
+**2. Run the harness.**
+
+```bash
+harness data/test_cases.jsonl
+```
+
+**3. Read the summary** (see [How to read the output](#how-to-read-the-output) below).
+
+**4. Save full results for inspection.**
+
+```bash
+harness data/test_cases.jsonl --output my_run.json
+```
+
+**5. Try different scorers and modes** — see [How to run](#how-to-run) for all flags.
 
 ---
 
@@ -117,6 +156,98 @@ Each line in a JSONL file is one test case:
 | `expected` | string | Expected response (used for scoring) |
 
 See [`sample_data/`](sample_data/) for ready-to-use examples.
+
+---
+
+## How to read the output
+
+A typical run prints:
+
+```
+============================================================
+EVAL SUMMARY  total=5  passed=1  failed=4  errors=0  pass_rate=20.0%
+============================================================
+
+FAILURES / ERRORS:
+  [q2] score=0.0000  score 0.00 < threshold 0.50; missing tokens: ['direct', 'manager']
+           input:    'Who approves travel claims?'
+           expected: 'Direct manager'
+           got:      'Medical certificates must be submitted within 3 working days'
+
+ANOMALIES:
+  all responses identical ('14 days annual leave') — endpoint may be returning a fixed stub
+```
+
+| Section | What it means |
+|---|---|
+| `total / passed / failed / errors` | `errors` = endpoint threw an exception; `failed` = ran but scored below threshold |
+| `score=0.00 < threshold 0.50` | Jaccard overlap between response and expected tokens — 0 = no shared words, 1 = exact |
+| `missing tokens: [...]` | Words in the expected answer that are absent from the response |
+| `ANOMALIES` | Automatic sanity checks: all-errors (endpoint down?), all-identical (stuck stub?) |
+
+With `--output results.json` you get the same data as machine-readable JSON, one object per case, plus `pass_rate` at the top level. Useful for CI thresholds or post-run analysis.
+
+Exit codes: `0` = all passed · `1` = at least one failure or error · `2` = bad input file.
+
+---
+
+## How to add custom evaluation
+
+### A. Custom test cases (no code needed)
+
+Create any `.jsonl` file with three fields per line and pass it directly:
+
+```jsonl
+{"id": "leave-01", "input": "How many days of annual leave do I get?", "expected": "14 days annual leave"}
+{"id": "travel-01", "input": "Who approves my travel claim?", "expected": "Direct manager"}
+```
+
+```bash
+harness my_cases.jsonl
+```
+
+### B. Custom endpoint (point at a real LLM)
+
+The `call_endpoint` function in `harness/mock_endpoint.py` is the only place the harness talks to a model. Swap it out in `main.py`, or call `run_evaluation()` directly from your own script:
+
+```python
+import requests
+from harness.loader import load_test_cases
+from harness.runner import run_evaluation, format_summary
+
+def my_endpoint(prompt: str) -> str:
+    resp = requests.post(
+        "http://your-llm-host/v1/chat",
+        json={"prompt": prompt},
+        timeout=30,
+    )
+    resp.raise_for_status()
+    return resp.json()["response"]
+
+cases = load_test_cases("my_cases.jsonl")
+summary = run_evaluation(cases, endpoint=my_endpoint)
+print(format_summary(summary))
+```
+
+### C. Custom scorer
+
+Implement a function with the signature `(response: str, expected: str) -> Score` and pass it to `run_evaluation()`:
+
+```python
+from harness.scorer import Score
+from harness.runner import run_evaluation
+
+def semantic_match(response: str, expected: str) -> Score:
+    # e.g. cosine similarity via sentence-transformers
+    score = my_embedding_similarity(response, expected)
+    passed = score >= 0.7
+    return Score(passed=passed, method="semantic", score=score,
+                 reason="semantic similarity" if passed else f"similarity {score:.2f} < 0.70")
+
+summary = run_evaluation(cases, endpoint=my_endpoint, scorer=semantic_match)
+```
+
+The built-in scorers in `harness/scorer.py` follow the same pattern and are good reference implementations.
 
 ---
 
