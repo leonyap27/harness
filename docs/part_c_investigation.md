@@ -4,14 +4,14 @@
 
 ---
 
-## 1. Index freshness / version mismatch
+## 1. Index staleness — reconciliation query
 
-The vector index may not reflect the latest document versions. I would run a reconciliation query comparing each document's `last_modified` timestamp in the source store against its `indexed_at` metadata field in the vector database (supported natively in Weaviate, Qdrant, and Pinecone). Any document where `indexed_at < last_modified` is stale. From there I would check the ingestion pipeline — specifically whether the scheduled re-embedding job is firing, succeeding, and committing. A silent failure in the pipeline (no alerting on non-zero exit) is the most common culprit.
+The most likely cause is the vector index lagging behind the monthly document refresh. I would run a reconciliation pass: compare each document's `last_modified` timestamp on the file system against the `indexed_at` field stored in chunk metadata at ingestion time. Any document where `indexed_at < last_modified` has stale embeddings. I would then inspect the batch job logs for the last three runs to confirm the job completed — a silent partial exit due to OOM or disk pressure is the most common culprit at this scale, and it leaves the index in a mixed-revision state with no visible error to the user.
 
-## 2. Retrieval quality regression
+## 2. Retrieval quality drift — Recall@k on a golden set
 
-The embedding model or its configuration may have drifted from the baseline. I would compute Recall@k and NDCG@k on a held-out golden set (query → relevant document pairs assembled at deployment time) and compare against the deployment-day baseline. If the metric has dropped, the next step is to diff the embedding model checkpoint and re-embed a sample corpus with the original model version to isolate whether the regression is in the model or in a preprocessing change (tokenisation, normalisation, truncation length).
+A shift in retrieval quality produces plausible-sounding but wrong answers even when the index is current. I would build a golden set of 20–30 query/passage pairs from known-correct answers at deployment time, then compute Recall@5 and NDCG@5 on the current index and compare against the baseline. If the metric dropped, I would check whether the embedding model binary or tokeniser changed since deployment — even a minor library upgrade can shift the embedding space enough to degrade retrieval without triggering any error.
 
-## 3. Chunking or metadata filtering issue
+## 3. Chunking or metadata filter mismatch — BM25 comparison
 
-Relevant content may exist in the index but not be retrieved due to chunk boundary problems or overly restrictive metadata filters. I would run BM25 (e.g., Elasticsearch or rank-bm25) over the raw documents for the same queries and compare which passages surface versus what the dense retriever returns. Passages that score high in BM25 but low in dense retrieval indicate a chunking or embedding mismatch. Separately, I would audit any department- or date-range metadata filters applied at query time to confirm they are not inadvertently excluding valid documents.
+Relevant content may exist in the index but fail to surface due to chunk boundary errors or an overly restrictive metadata filter. I would run BM25 (via `rank-bm25`, no external dependencies) over the raw document text for the failing queries, then compare which passages rank highly against what the dense retriever returns. Passages that score well under BM25 but are absent from dense retrieval point to a chunking or embedding mismatch. I would also audit any department or date-range metadata filters applied at query time to confirm they are not inadvertently excluding valid documents.

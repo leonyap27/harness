@@ -32,10 +32,10 @@ The system is a standard **Retrieval-Augmented Generation (RAG)** pipeline split
 ```
 
 **Components:**
-- **Document store** – shared file system or internal S3-compatible store holding the source files.
+- **Document store** – shared network file system (NFS/SMB) holding the source files. No cloud storage — all data stays on-prem.
 - **Parser** – extracts plain text from PDF/DOCX (PyMuPDF / python-docx). Runs on CPU in the batch job.
 - **Chunker** – splits text into 512-token chunks with 50-token overlap. Preserves document ID and page number as metadata.
-- **Embedding model** – a small bi-encoder (e.g., `all-MiniLM-L6-v2`, bundled on-prem). Runs on CPU; GPU not required for embedding at this scale.
+- **Embedding model** – a small bi-encoder (e.g., `all-MiniLM-L6-v2`) bundled and cached locally. No external API calls; the serving layer has no internet access. Runs on CPU; GPU not required for embedding at this scale.
 - **Vector DB** – [Chroma](https://www.trychroma.com/) running as a persistent local server. Stores chunk embeddings plus metadata (source doc, page, last-updated timestamp).
 - **RAG service** – a lightweight HTTP service (FastAPI) that handles the online query path: embed → retrieve → build prompt → call LLM → return.
 - **LLM endpoint** – the existing GPU-cluster endpoint behind the API gateway. Not owned by this team.
