@@ -270,21 +270,14 @@ summary = run_evaluation(cases, endpoint=my_endpoint, scorer=semantic_match)
 
 ## How scoring works
 
-Two built-in scorers, both normalise text (lowercase, collapsed whitespace) before comparing.
+Both scorers normalise text (lowercase, collapsed whitespace) before comparing.
 
-**`keyword_overlap`** (default) — Jaccard similarity on token sets:
+| Scorer | Algorithm | Passes when | Best for |
+|---|---|---|---|
+| `keyword_overlap` *(default)* | Jaccard similarity on token sets: intersection ÷ union | score ≥ 0.5 | Policy answers where paraphrase is acceptable but key terms (numbers, names, IDs) must appear |
+| `exact_match` | Case-insensitive string equality | strings match exactly | Short canonical phrases with a single correct form |
 
-Each line in a JSONL file is one test case:
-
-```json
-{"id": "q1", "input": "What is the leave policy?", "expected": "14 days annual leave"}
-```
-score = |tokens(response) ∩ tokens(expected)| / |tokens(response) ∪ tokens(expected)|
-```
-
-Passes when `score ≥ 0.5`. Good for policy answers where paraphrase is acceptable but key terms (numbers, names, IDs) must appear.
-
-**`exact_match`** — case-insensitive, whitespace-normalised string equality. Score is `1.0` (pass) or `0.0` (fail). Use when the expected answer is a short canonical phrase.
+Score is `0.0` (no shared tokens) → `1.0` (identical token sets) for `keyword_overlap`, or `0.0` / `1.0` for `exact_match`.
 
 ## How errors are handled
 
