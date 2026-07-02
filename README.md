@@ -305,16 +305,39 @@ Passes when `score ≥ 0.5`. Good for policy answers where paraphrase is accepta
 
 # Part C — Investigation: Outdated or Irrelevant Answers
 
-**Scenario:** Six months post-deployment, users report answers that are outdated or irrelevant even though source documents are correct and up to date.
+> **Scenario:** Six months post-deployment, users report answers that are outdated or irrelevant even though source documents are correct and up to date.
+
+| # | Investigation | Method | Signal |
+|---|---|---|---|
+| 1 | Index staleness | Timestamp reconciliation | `indexed_at < last_modified` on any document |
+| 2 | Retrieval quality drift | Recall@5 / NDCG@5 on a golden set | Metric drop vs. deployment baseline |
+| 3 | Chunking / filter mismatch | BM25 vs. dense retriever comparison | Passages rank well in BM25 but absent from dense results |
 
 ## 1. Index staleness — reconciliation query
 
-The most likely cause is the vector index lagging behind the monthly document refresh. I would run a reconciliation pass: compare each document's `last_modified` timestamp on the file system against the `indexed_at` field stored in chunk metadata at ingestion time. Any document where `indexed_at < last_modified` has stale embeddings. I would then inspect the batch job logs for the last three runs to confirm the job completed — a silent partial exit due to OOM or disk pressure is the most common culprit at this scale, and it leaves the index in a mixed-revision state with no visible error to the user.
+**Most likely cause.** The vector index is lagging behind the monthly document refresh.
+
+**What I'd do:**
+- Run a reconciliation pass: compare each document's `last_modified` timestamp on the file system against the `indexed_at` field stored in chunk metadata at ingestion time.
+- Any document where `indexed_at < last_modified` has stale embeddings and must be re-ingested.
+- Inspect batch job logs for the last three runs to confirm each completed — a silent partial exit due to OOM or disk pressure is the most common culprit at this scale.
+
+**Why it's hard to catch:** A partial re-ingestion leaves the index in a mixed-revision state (some chunks at N+1, others at N). The LLM synthesises a confident answer from inconsistent context; neither the user nor the system surfaces an error.
 
 ## 2. Retrieval quality drift — Recall@k on a golden set
 
-A shift in retrieval quality produces plausible-sounding but wrong answers even when the index is current. I would build a golden set of 20–30 query/passage pairs from known-correct answers at deployment time, then compute Recall@5 and NDCG@5 on the current index and compare against the baseline. If the metric dropped, I would check whether the embedding model binary or tokeniser changed since deployment — even a minor library upgrade can shift the embedding space enough to degrade retrieval without triggering any error.
+**What I'd do:**
+- Build a golden set of 20–30 query/passage pairs from known-correct answers captured at deployment time.
+- Compute **Recall@5** and **NDCG@5** on the current index and compare against the baseline.
+- If metrics dropped, check whether the embedding model binary or tokeniser changed since deployment — even a minor library upgrade can shift the embedding space enough to degrade retrieval without raising any error.
+
+**Signal:** A drop in Recall@5 means the right chunk exists in the index but is no longer surfacing in the top-5 results — the LLM never sees the correct content regardless of prompt quality.
 
 ## 3. Chunking or metadata filter mismatch — BM25 comparison
 
-Relevant content may exist in the index but fail to surface due to chunk boundary errors or an overly restrictive metadata filter. I would run BM25 (via `rank-bm25`, no external dependencies) over the raw document text for the failing queries, then compare which passages rank highly against what the dense retriever returns. Passages that score well under BM25 but are absent from dense retrieval point to a chunking or embedding mismatch. I would also audit any department or date-range metadata filters applied at query time to confirm they are not inadvertently excluding valid documents.
+**What I'd do:**
+- Run BM25 (via `rank-bm25`, no external dependencies) over the raw document text for each failing query.
+- Compare which passages rank highly under BM25 against what the dense retriever returns.
+- Audit any department or date-range metadata filters applied at query time to confirm they are not inadvertently excluding valid documents.
+
+**Signal:** Passages that score well under BM25 but are absent from dense retrieval point to a chunking boundary error or embedding-space mismatch — the content exists in the corpus but is unreachable via vector search.
