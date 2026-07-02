@@ -10,7 +10,7 @@ Built for the Q Team take-home assignment (Part B, Option 1).
 
 - Loads test cases from a JSONL file (one JSON object per line: `id`, `input`, `expected`)
 - Runs each test case against a configurable LLM endpoint (or a built-in mock that returns deterministic/random strings)
-- Scores each response using a pluggable scoring strategy (exact match, keyword overlap, or fuzzy similarity)
+- Scores each response using a pluggable scoring strategy (exact match or keyword overlap — see [How scoring works](#how-scoring-works))
 - Outputs a structured summary: pass rate, per-case results, failures with reasons, and any anomalies
 - Handles endpoint errors (timeouts, HTTP errors, malformed responses) gracefully
 
@@ -59,18 +59,36 @@ Requires Python 3.11+. No external API key needed — the mock endpoint is built
 ## How to run
 
 ```bash
-# Run the harness against the built-in mock endpoint
-harness run sample_data/normal_policy.jsonl
+# Run the harness against the built-in mock endpoint (random mode)
+harness sample_data/normal_policy.jsonl
 
-# Run against a real endpoint
-harness run sample_data/normal_policy.jsonl --endpoint http://your-llm-host/v1/chat
+# Use exact-match scoring instead of the default keyword overlap
+harness sample_data/normal_policy.jsonl --scorer exact_match
 
-# Specify scoring strategy (default: keyword_overlap)
-harness run sample_data/normal_policy.jsonl --scorer exact_match
+# Fixed response mode with a seed for reproducible runs
+harness sample_data/normal_policy.jsonl --mode fixed --seed 42
+
+# Simulate 20% endpoint failure rate (tests error handling)
+harness sample_data/normal_policy.jsonl --fail-rate 0.2
+
+# Write full JSON results to a file
+harness sample_data/normal_policy.jsonl --output results.json
 
 # Run tests
 pytest tests/ -v
 ```
+
+All options:
+
+| Flag | Default | Description |
+|---|---|---|
+| `test_file` | *(required)* | Path to a `.jsonl` file |
+| `--scorer` | `keyword_overlap` | `keyword_overlap` or `exact_match` |
+| `--mode` | `random` | Mock response mode: `random`, `fixed`, or `echo` |
+| `--seed` | `None` | RNG seed for reproducible random runs |
+| `--fail-rate` | `0.0` | Probability `[0–1]` that a call raises a simulated error |
+| `--output` | `None` | Write full JSON results to this path |
+| `--log-level` | `WARNING` | `DEBUG`, `INFO`, `WARNING`, or `ERROR` |
 
 ---
 
@@ -89,6 +107,41 @@ Each line in a JSONL file is one test case:
 | `expected` | string | Expected response (used for scoring) |
 
 See [`sample_data/`](sample_data/) for ready-to-use examples.
+
+---
+
+## How scoring works
+
+Two built-in scorers are available. Both normalise text (lowercase, collapsed whitespace) before comparing.
+
+**`keyword_overlap`** (default) — Jaccard similarity on token sets.
+
+Each line in a JSONL file is one test case:
+
+```json
+{"id": "q1", "input": "What is the leave policy?", "expected": "14 days annual leave"}
+```
+score = |tokens(response) ∩ tokens(expected)| / |tokens(response) ∪ tokens(expected)|
+```
+
+A case passes when `score >= 0.5`. Appropriate for policy-style answers where word-for-word match is unrealistic but key terms (numbers, names, IDs) should appear.
+
+**`exact_match`** — case-insensitive, whitespace-normalised string equality. Score is `1.0` (pass) or `0.0` (fail). Use when the expected answer is a short canonical phrase and paraphrase is unacceptable.
+
+Select with `--scorer exact_match`. To add a custom scorer, implement `(response: str, expected: str) -> Score` and pass it directly to `run_evaluation()`.
+
+---
+
+## How errors are handled
+
+The harness treats every failure as a data point rather than a crash:
+
+- **Malformed JSONL** — the loader raises `ValueError` with the line number and field name before any cases run. The CLI prints the error and exits with code `2`.
+- **Missing file** — `FileNotFoundError` is raised immediately on load. Same exit path.
+- **Endpoint error** (any exception during a call) — the case is recorded as an error (`response=None`, `error=<message>`). The remaining cases continue to run.
+- **Anomaly detection** — after the run, the summary flags: all-cases-errored (endpoint likely down) and all-responses-identical (endpoint may be returning a fixed stub).
+
+Exit codes: `0` = all passed, `1` = at least one failure or error, `2` = input error (bad file, bad JSON).
 
 ---
 
